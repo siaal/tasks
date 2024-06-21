@@ -4,8 +4,15 @@ use std::process::exit;
 use clap::{Args, Parser, Subcommand};
 use fuzzy_finder::item::Item;
 use fuzzy_finder::FuzzyFinder;
+use rand::Rng;
 use tasks::task::Task;
 use tasks::{init_directory, Bank, Config};
+
+// TODO:
+// change the printing format
+//  print dates nicer
+//  print descriptions nicer
+// change config so that cutoff accepts strings
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about=None)] // version|about filled in from cargo.toml
@@ -17,10 +24,6 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 }
-
-// TODO:
-// random
-// edit
 
 #[derive(Debug, Args)]
 struct AddArgs {
@@ -35,6 +38,21 @@ struct AddArgs {
     priority:    u16,
 }
 
+#[derive(Debug, Args)]
+struct EditArgs {
+    /// New Name
+    #[arg(short, long)]
+    name:        Option<String>,
+    /// New Description
+    #[arg(short, long)]
+    description: Option<String>,
+    /// New Priority
+    #[arg(short, long)]
+    priority:    Option<u16>,
+    /// Identifier string
+    identifier:  String,
+}
+
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Add a new task
@@ -42,10 +60,13 @@ enum Commands {
     Add(AddArgs),
     /// Produce a random task, with a bias for older tasks
     #[command(short_flag = 'r', alias = "r")]
-    Random,
+    Random {
+        #[arg(default_value_t = 1)]
+        n: u8,
+    },
     /// Edit an existing task
     #[command(short_flag = 'e', alias = "e")]
-    Edit(AddArgs),
+    Edit(EditArgs),
     /// Update the last played, without closing it
     #[command(short_flag = 't', alias = "t")]
     Touch {
@@ -91,7 +112,7 @@ fn main() {
     } else {
         (cli, conf)
     };
-    let command = cli.command.unwrap_or(Commands::Random);
+    let command = cli.command.unwrap_or(Commands::Random { n: 1 });
     let command = dbg!(command);
     init_directory(&conf.task_path).unwrap();
     match &command {
@@ -99,12 +120,65 @@ fn main() {
         Commands::Add(opts) => run_add(&conf, opts),
         Commands::Touch { terms } => run_touch(&conf, terms),
         Commands::Done { terms } => run_done(&conf, terms),
-        Commands::Close { terms } => {
-            run_complete(&conf, terms);
-        },
-        _ => {
-            panic!("not implemented");
-        },
+        Commands::Close { terms } => run_complete(&conf, terms),
+        Commands::Random { n } => run_random(&conf, *n),
+        Commands::Edit(args) => run_edit(&conf, args),
+    }
+}
+
+fn run_random(conf: &Config, n: u8) {
+    let conf = dbg!(conf);
+    let active = get_active_file(&conf);
+    let bank = Bank::from_file(&active).expect("unable to read file");
+
+    let now = chrono::Local::now();
+    let mappings: Vec<(u64, usize)> = bank
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, task)| {
+            let duration_passed: u64 = now
+                .signed_duration_since(task.last_touched())
+                .num_seconds()
+                .try_into()
+                .unwrap();
+            if duration_passed < (conf.cutoff) {
+                return None;
+            }
+            return Some((idx, duration_passed));
+        })
+        .scan(0 as u64, |counter, (idx, duration_passed)| {
+            *counter += duration_passed;
+            Some((counter.clone(), idx))
+        })
+        .collect();
+    if mappings.len() == 0 {
+        println!("You have no tasks!");
+        exit(0);
+    }
+    let mappings = dbg!(mappings);
+    let mut chosen: Vec<usize> = vec![];
+    let mut rng = rand::thread_rng();
+    let max_mapping = mappings[mappings.len() - 1].0;
+    for _ in 0..n {
+        loop {
+            let chosen_passed: u64 = rng.gen_range((0 as u64)..=max_mapping);
+
+            let loc = match mappings.binary_search_by_key(&chosen_passed, |(passed, _idx)| *passed)
+            {
+                Ok(loc) => loc,
+                Err(loc) => loc,
+            };
+
+            if chosen.contains(&loc) {
+                continue;
+            }
+            chosen.push(loc);
+            break;
+        }
+    }
+    let chosen: Vec<&Task> = chosen.iter().map(|idx| &bank.tasks[*idx]).collect();
+    for task in chosen {
+        print_task(&task);
     }
 }
 
@@ -132,6 +206,16 @@ fn run_done(conf: &Config, terms: &[String]) {
 
 fn run_complete(conf: &Config, terms: &[String]) {
     retire_item(conf, terms);
+}
+
+fn run_edit(conf: &Config, args: &EditArgs) {
+    update_item(conf, &[args.identifier.clone()], |task| {
+        task.updated_todo(
+            args.description.as_deref(),
+            args.priority.as_ref(),
+            args.name.as_deref(),
+        )
+    });
 }
 
 fn update_item<F>(conf: &Config, terms: &[String], f: F)
@@ -228,10 +312,14 @@ fn run_list(conf: &Config, terms: &Vec<String>) {
         );
     } else {
         for task in items {
-            println!("{}", task);
+            print_task(&task);
         }
     }
     exit(0);
+}
+
+fn print_task(task: &Task) {
+    println!("{}", task)
 }
 
 fn get_closed_file(conf: &Config) -> PathBuf {

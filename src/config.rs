@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-const PATH: [&'static str; 2] = ["~/.config/tasks/tasks.conf", "~/.config/tasks.conf"];
+const PATH: [&'static str; 2] = ["~/.config/tasks/tasks.toml", "~/.config/tasks.toml"];
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Config {
@@ -12,6 +12,12 @@ pub struct Config {
     pub task_path: PathBuf,
     #[serde(default = "default_verbose")]
     pub verbose:   bool,
+    #[serde(default = "default_cutoff")]
+    pub cutoff:    u64,
+}
+
+fn default_cutoff() -> u64 {
+    return 60 * 60 * 24; // 1 day
 }
 
 fn expand_path(path: &str) -> PathBuf {
@@ -41,6 +47,7 @@ impl Default for Config {
         return Config {
             task_path: default_path(),
             verbose:   default_verbose(),
+            cutoff:    default_cutoff(),
         };
     }
 }

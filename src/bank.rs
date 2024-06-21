@@ -10,7 +10,7 @@ use crate::task::Task;
 pub struct Bank {
     #[serde(skip)]
     bank_path: PathBuf,
-    tasks:     Vec<Task>,
+    pub tasks: Vec<Task>,
 }
 
 impl Bank {

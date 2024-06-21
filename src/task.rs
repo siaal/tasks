@@ -42,6 +42,44 @@ impl Task {
         &self.metadata.id
     }
 
+    pub fn last_touched(&self) -> &DateTime<Local> {
+        &self.metadata.last_completed
+    }
+    pub fn closed(&self) -> &Option<DateTime<Local>> {
+        &self.metadata.closed_at
+    }
+    pub fn priority(&self) -> &u16 {
+        &self.metadata.priority
+    }
+
+    pub fn description(&self) -> &Option<String> {
+        &self.metadata.description
+    }
+
+    pub fn created(&self) -> &DateTime<Local> {
+        &self.metadata.created
+    }
+
+    pub fn updated_todo<'a>(
+        &self,
+        desc: Option<&'a str>,
+        priority: Option<&u16>,
+        name: Option<&'a str>,
+    ) -> Task {
+        let mut out = self.clone();
+        if let Some(desc) = desc {
+            out.metadata.description = Some(desc.to_string());
+        }
+        if let Some(name) = name {
+            out.metadata.name = name.to_string();
+        }
+
+        if let Some(priority) = priority {
+            out.metadata.priority = priority.clone();
+        }
+        return out;
+    }
+
     pub fn new_todo<'a>(name: String, description: Option<&'a str>, priority: Option<u16>) -> Task {
         let task = TaskType::Todo {};
         let mut meta = Metadata::new();
