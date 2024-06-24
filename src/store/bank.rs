@@ -8,16 +8,10 @@ use crate::task::Task;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Bank {
-    #[serde(skip)]
-    bank_path: PathBuf,
     pub tasks: Vec<Task>,
 }
 
 impl Bank {
-    pub fn close(&self) -> Result<(), Box<dyn Error>> {
-        self.to_file(&self.bank_path)
-    }
-
     pub fn update(&mut self, updated_task: Task) -> bool {
         for (i, task) in self.tasks.iter().enumerate() {
             if task.id() == updated_task.id() {
@@ -43,26 +37,29 @@ impl Bank {
         return false;
     }
 
+    pub fn find(&self, task_id: &str) -> Option<&Task> {
+        for e in self.tasks.iter() {
+            if e.id() == task_id {
+                return Some(&e);
+            }
+        }
+        return None;
+    }
+
     pub fn empty() -> Bank {
-        return Bank {
-            bank_path: "".into(),
-            tasks:     vec![],
-        };
+        return Bank { tasks: vec![] };
     }
 
     pub fn from_file(path: &PathBuf) -> Result<Bank, Box<dyn Error>> {
         let s = std::fs::read_to_string(path)?;
-        let mut bank: Bank = serde_yml::from_str(s.as_str())?;
-        bank.bank_path = path.clone();
+        let bank: Bank = serde_yml::from_str(s.as_str())?;
         return Ok(bank);
     }
 
     pub fn to_file<'a>(&self, file: &PathBuf) -> Result<(), Box<dyn Error>> {
-        let s = serde_yml::to_string(dbg!(self))?;
-        let f = std::fs::File::create(file)?;
+        let s = serde_yml::to_string(self)?;
+        let mut f = std::fs::File::create(file)?;
 
-        let s = dbg!(s);
-        let mut f = dbg!(f);
         f.write_all(s.as_bytes())?;
 
         return Ok(());

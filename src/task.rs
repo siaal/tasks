@@ -1,6 +1,7 @@
 use core::fmt;
 
 use chrono::{DateTime, Local};
+use colored::Colorize;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Task {
@@ -168,6 +169,56 @@ impl Task {
 
 impl fmt::Display for Task {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        return write!(f, "{:?}", self);
+        write!(
+            f,
+            "{} {}\n{} - {}\n",
+            "Id:".italic(),
+            self.metadata.id.to_string().cyan(),
+            self.metadata.name.to_string().bold().yellow(),
+            self.task.to_string().green()
+        )?;
+        match &self.metadata.description {
+            Some(desc) => {
+                write!(f, "{}\n", desc.to_string().italic().blue())?;
+            },
+            None => {
+                write!(
+                    f,
+                    "{}\n",
+                    "No description provided.".to_string().italic().blue()
+                )?;
+            },
+        }
+        let when = chrono::Local::now()
+            .signed_duration_since(&self.metadata.last_completed)
+            .num_hours();
+        write!(f, "{}", "Last Performed: ".italic())?;
+        if when > 24 {
+            let days = when / 24;
+            let when = when % 24;
+            let days_str = if days > 1 { "days, " } else { "day, " };
+            write!(
+                f,
+                "{} {} {} {}",
+                days.to_string().magenta(),
+                days_str.magenta(),
+                when.to_string().magenta(),
+                "hours ago".magenta()
+            )?;
+        } else {
+            write!(
+                f,
+                "{} {}",
+                when.to_string().magenta(),
+                "hours ago".magenta()
+            )?;
+        }
+        write!(
+            f,
+            "\n{} {}",
+            "Priority:".italic(),
+            self.metadata.priority.to_string().blue()
+        )?;
+        return Ok(());
     }
 }

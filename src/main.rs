@@ -1,307 +1,190 @@
-use std::path::PathBuf;
+// TODO:
+// change config so that cutoff accepts strings
+// implement undo file
+// implement proj files
+use std::error::Error;
 use std::process::exit;
 
-use clap::{Args, Parser, Subcommand};
-use fuzzy_finder::item::Item;
-use fuzzy_finder::FuzzyFinder;
-use rand::Rng;
+use clap::Parser;
+use tasks::parser::{AddArgs, Cli, Commands, EditArgs};
+use tasks::store::{init_store, Store};
 use tasks::task::Task;
-use tasks::{init_directory, Bank, Config};
+use tasks::Config;
 
-// TODO:
-// change the printing format
-//  print dates nicer
-//  print descriptions nicer
-// change config so that cutoff accepts strings
-
-#[derive(Debug, Parser)]
-#[command(version, about, long_about=None)] // version|about filled in from cargo.toml
-struct Cli {
-    ///Turn debugging information on
-    #[arg(short, long)]
-    verbose: bool,
-
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Debug, Args)]
-struct AddArgs {
-    /// Task name
-    name:        String,
-    /// Longer description of task
-    #[arg(short, long)]
-    description: Option<String>,
-    /// Modifier to time bias takes integer 0+
-    #[arg(short, long)]
-    #[arg(default_value_t = 100)]
-    priority:    u16,
-}
-
-#[derive(Debug, Args)]
-struct EditArgs {
-    /// New Name
-    #[arg(short, long)]
-    name:        Option<String>,
-    /// New Description
-    #[arg(short, long)]
-    description: Option<String>,
-    /// New Priority
-    #[arg(short, long)]
-    priority:    Option<u16>,
-    /// Identifier string
-    identifier:  String,
-}
-
-#[derive(Debug, Subcommand)]
-enum Commands {
-    /// Add a new task
-    #[command(short_flag = 'a', alias = "a")]
-    Add(AddArgs),
-    /// Produce a random task, with a bias for older tasks
-    #[command(short_flag = 'r', alias = "r")]
-    Random {
-        #[arg(default_value_t = 1)]
-        n: u8,
-    },
-    /// Edit an existing task
-    #[command(short_flag = 'e', alias = "e")]
-    Edit(EditArgs),
-    /// Update the last played, without closing it
-    #[command(short_flag = 't', alias = "t")]
-    Touch {
-        #[arg(required = true)]
-        /// Filter search with provided terms
-        terms: Vec<String>,
-    },
-    /// Complete a round of the task, without closing it
-    #[command(short_flag = 'd', alias = "d")]
-    Done {
-        #[arg(required = true)]
-        /// Filter search with provided terms
-        terms: Vec<String>,
-    },
-    /// Complete and close a task
-    #[command(
-        short_flag = 'c',
-        alias = "f",
-        visible_alias = "finish",
-        visible_alias = "complete",
-        visible_short_flag_alias = 'f'
-    )]
-    Close {
-        /// Filter search with provided terms
-        #[arg(required = true)]
-        terms: Vec<String>,
-    },
-    /// List pending tasks
-    #[command(short_flag = 'l', alias = "l")]
-    List {
-        /// Filter search with provided terms
-        terms: Vec<String>,
-    },
-}
-
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
-    let conf = Config::from_path();
-    let (cli, conf) = if conf.verbose {
-        let cli = dbg!(cli);
-        let conf = dbg!(conf);
-        (cli, conf)
-    } else {
-        (cli, conf)
+    let mut conf = Config::from_path();
+    if !conf.debug && cli.debug {
+        conf.debug = cli.debug;
+    }
+    if conf.debug {
+        dbg!(&cli.command);
+        println!(
+            "The path where tasks are stored: {}",
+            &conf.task_path.to_str().ok_or("")?
+        );
+        dbg!(&conf);
+    }
+    if cli.force {
+        conf.cutoff = 0;
+        run_random(&conf, 1);
+        exit(0);
+    }
+    let command = cli.command.unwrap_or(Commands::Random {
+        n:     1,
+        force: false,
+    });
+    if conf.debug {
+        dbg!(&command);
     };
-    let command = cli.command.unwrap_or(Commands::Random { n: 1 });
-    let command = dbg!(command);
-    init_directory(&conf.task_path).unwrap();
+    init_store(&conf.task_path)?;
     match &command {
         Commands::List { terms } => run_list(&conf, terms),
+        Commands::Last => run_list(&conf, &["last".into()].to_vec()),
         Commands::Add(opts) => run_add(&conf, opts),
-        Commands::Touch { terms } => run_touch(&conf, terms),
-        Commands::Done { terms } => run_done(&conf, terms),
+        Commands::Touch { terms } | Commands::Done { terms } => run_touch(&conf, terms),
         Commands::Close { terms } => run_complete(&conf, terms),
-        Commands::Random { n } => run_random(&conf, *n),
+        Commands::Random { n, force } => {
+            if *force {
+                conf.cutoff = 0;
+            }
+            run_random(&conf, *n);
+        },
         Commands::Edit(args) => run_edit(&conf, args),
+        Commands::Undo => run_undo(&conf),
+    };
+    Ok(())
+}
+
+fn run_undo(conf: &Config) {
+    let store = Store::new(conf.task_path.clone());
+    match store.undo() {
+        Ok(item) => println!("Undone operation:\n{}", item),
+        Err(error) => println!("Error in undo: {}", error.to_string()),
     }
 }
 
 fn run_random(conf: &Config, n: u8) {
-    let conf = dbg!(conf);
-    let active = get_active_file(&conf);
-    let bank = Bank::from_file(&active).expect("unable to read file");
+    let store = Store::new(conf.task_path.clone());
+    let items = store.select_random(n, conf.cutoff.clone());
 
-    let now = chrono::Local::now();
-    let mappings: Vec<(u64, usize)> = bank
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, task)| {
-            let duration_passed: u64 = now
-                .signed_duration_since(task.last_touched())
-                .num_seconds()
-                .try_into()
-                .unwrap();
-            if duration_passed < (conf.cutoff) {
-                return None;
-            }
-            return Some((idx, duration_passed));
-        })
-        .scan(0 as u64, |counter, (idx, duration_passed)| {
-            *counter += duration_passed;
-            Some((counter.clone(), idx))
-        })
-        .collect();
-    if mappings.len() == 0 {
-        println!("You have no tasks!");
-        exit(0);
-    }
-    let mappings = dbg!(mappings);
-    let mut chosen: Vec<usize> = vec![];
-    let mut rng = rand::thread_rng();
-    let max_mapping = mappings[mappings.len() - 1].0;
-    for _ in 0..n {
-        loop {
-            let chosen_passed: u64 = rng.gen_range((0 as u64)..=max_mapping);
-
-            let loc = match mappings.binary_search_by_key(&chosen_passed, |(passed, _idx)| *passed)
-            {
-                Ok(loc) => loc,
-                Err(loc) => loc,
-            };
-
-            if chosen.contains(&loc) {
-                continue;
-            }
-            chosen.push(loc);
-            break;
-        }
-    }
-    let chosen: Vec<&Task> = chosen.iter().map(|idx| &bank.tasks[*idx]).collect();
-    for task in chosen {
-        print_task(&task);
+    print_tasks(&items);
+    if conf.debug {
+        dbg!(&items.len());
     }
 }
 
 fn run_add(conf: &Config, args: &AddArgs) {
-    let active = get_active_file(conf);
-    let active = dbg!(active);
+    let store = Store::new(conf.task_path.clone());
     let desc = match &args.description {
         Some(desc) => Some(desc.as_str()),
         None => None,
     };
-    let task = Task::new_todo(args.name.clone(), desc, Some(args.priority));
-    let mut bank = Bank::from_file(&active).expect("unable to read file");
-    bank.append(task);
-    let bank = dbg!(bank);
-    bank.close().unwrap();
-    exit(0);
+
+    let task = Task::new_todo(args.name.join(" "), desc, Some(args.priority));
+    match store.append(task) {
+        Ok(task) => {
+            println!("Appended task:");
+            print_task(&task);
+        },
+        Err(err) => println!("Could not add task. {}", err.to_string()),
+    }
 }
 
 fn run_touch(conf: &Config, terms: &[String]) {
-    update_item(conf, terms, Task::touched);
-}
-fn run_done(conf: &Config, terms: &[String]) {
-    update_item(conf, terms, Task::touched)
+    let store = Store::new(conf.task_path.clone());
+    let found = store.fzf(terms);
+    match found {
+        None => {
+            println!("Could not find task!");
+            exit(1);
+        },
+        Some(task) => {
+            println!("Editing:");
+            print_task(&task);
+            let task = update_item(store, task, conf, Task::touched);
+            println!("Touched: `{}`", task.name());
+        },
+    }
 }
 
 fn run_complete(conf: &Config, terms: &[String]) {
-    retire_item(conf, terms);
+    let retired = retire_item(conf, terms);
+    println!("Now retired:");
+    print_task(&retired);
 }
 
 fn run_edit(conf: &Config, args: &EditArgs) {
-    update_item(conf, &[args.identifier.clone()], |task| {
-        task.updated_todo(
-            args.description.as_deref(),
-            args.priority.as_ref(),
-            args.name.as_deref(),
-        )
-    });
+    let store = Store::new(conf.task_path.clone());
+    let found = store.fzf(args.identifier.as_ref());
+    match found {
+        None => {
+            println!("Could not find task!");
+            exit(1);
+        },
+        Some(task) => {
+            println!("Editing:");
+            print_task(&task);
+            print!("!!!!!!!!!!!! HAS BECOME !!!!!!!!!!!!");
+            let out = update_item(store, task, conf, |task| {
+                task.updated_todo(
+                    args.description.as_deref(),
+                    args.priority.as_ref(),
+                    args.name.as_deref(),
+                )
+            });
+            print_task(&out);
+        },
+    }
 }
 
-fn update_item<F>(conf: &Config, terms: &[String], f: F)
+fn update_item<F>(store: Store, task: Task, conf: &Config, f: F) -> Task
 where
     F: FnOnce(&Task) -> Task,
 {
-    let active = get_active_file(&conf);
-    let mut bank = Bank::from_file(&active).expect("Should be able to load bank");
-    match fzf(&bank, terms) {
+    if conf.debug {
+        dbg!(&task);
+    }
+    let result = store.update_item(task, f);
+    if conf.debug {
+        dbg!(&result);
+    }
+    match result {
+        Err(error) => {
+            println!("Failed to update item, {}", error.to_string());
+            exit(1);
+        },
+        Ok(task) => return task,
+    }
+}
+
+fn retire_item(conf: &Config, terms: &[String]) -> Task {
+    let store = Store::new(conf.task_path.clone());
+    let item = store.fzf(terms);
+    match item {
         None => {
             println!("No task selected. Exiting");
             exit(0);
         },
         Some(task) => {
-            let task = f(&task);
-            let success = bank.update(task);
-            if !success {
-                println!("Failed to update task - task not found");
-                exit(0);
+            let result = store.retire_item(&task);
+            match result {
+                Err(err) => {
+                    println!("{}", err.to_string());
+                    exit(1);
+                },
+                Ok(task) => {
+                    return task;
+                },
             }
-        },
-    }
-    bank.close().unwrap();
-}
-
-fn retire_item(conf: &Config, terms: &[String]) {
-    let active = get_active_file(&conf);
-    let closed = get_closed_file(&conf);
-    let mut bank = Bank::from_file(&active).expect("Should be able to load bank");
-    let mut closed_bank = Bank::from_file(&closed).expect("unable to open closed bank");
-    match fzf(&bank, terms) {
-        None => {
-            println!("No task selected. Exiting");
-            exit(0);
-        },
-        Some(task) => {
-            let task = task.completed();
-            let success = bank.delete(&task.id());
-            if !success {
-                println!("Failed to update task - task not found");
-                exit(0);
-            }
-            closed_bank.append(task);
-            closed_bank.close().unwrap();
-            bank.close().unwrap();
-        },
-    }
-}
-
-fn fzf(bank: &Bank, terms: &[String]) -> Option<Task> {
-    let terms = terms
-        .iter()
-        .map(|string| string.as_str())
-        .collect::<Vec<&str>>();
-    let items: Vec<Item<Task>> = bank
-        .iter()
-        .filter(|task| task.mass_contains(&terms))
-        .cloned()
-        .map(|task| Item::new(task.name().to_string(), task))
-        .collect();
-    match items.len() {
-        0 => return None,
-        1 => return items[0].item.clone(),
-        len => {
-            let len: i8 = len.try_into().unwrap();
-            let fzf = FuzzyFinder::find(items, len.clamp(1, 20));
-            match fzf {
-                Ok(opt) => return opt,
-                Err(err) => panic!("{}", err.to_string()),
-            };
         },
     }
 }
 
 fn run_list(conf: &Config, terms: &Vec<String>) {
-    let active = get_active_file(&conf);
-    let terms = terms
-        .iter()
-        .map(|string| string.as_str())
-        .collect::<Vec<&str>>();
-    let mut items = Bank::from_file(&active)
-        .expect("Unable to read active file")
-        .into_iter()
-        .filter(|task| task.mass_contains(&terms))
-        .peekable();
-    if items.peek().is_none() {
+    let store = Store::new(conf.task_path.clone());
+    let items = store.filter_active(terms);
+    if items.len() == 0 {
         println!(
             "{}",
             if terms.len() == 0 {
@@ -311,9 +194,7 @@ fn run_list(conf: &Config, terms: &Vec<String>) {
             }
         );
     } else {
-        for task in items {
-            print_task(&task);
-        }
+        print_tasks(&items);
     }
     exit(0);
 }
@@ -322,9 +203,12 @@ fn print_task(task: &Task) {
     println!("{}", task)
 }
 
-fn get_closed_file(conf: &Config) -> PathBuf {
-    conf.task_path.join("complete")
-}
-fn get_active_file(conf: &Config) -> PathBuf {
-    conf.task_path.join("active")
+fn print_tasks(tasks: &[Task]) {
+    if tasks.len() == 0 {
+        return;
+    }
+    println!("{}", tasks[0]);
+    for task in &tasks[1..] {
+        println!("\n{}", task)
+    }
 }

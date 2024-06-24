@@ -4,14 +4,19 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-const PATH: [&'static str; 2] = ["~/.config/tasks/tasks.toml", "~/.config/tasks.toml"];
+const PATH: [&'static str; 4] = [
+    "~/.config/tasks/tasks.toml",
+    "~/.config/tasks.toml",
+    "~/.config/tasks/tasks.conf",
+    "~/.config/tasks.conf",
+];
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Config {
     #[serde(default = "default_path", deserialize_with = "deserialize_path")]
     pub task_path: PathBuf,
     #[serde(default = "default_verbose")]
-    pub verbose:   bool,
+    pub debug:     bool,
     #[serde(default = "default_cutoff")]
     pub cutoff:    u64,
 }
@@ -46,7 +51,7 @@ impl Default for Config {
     fn default() -> Self {
         return Config {
             task_path: default_path(),
-            verbose:   default_verbose(),
+            debug:     default_verbose(),
             cutoff:    default_cutoff(),
         };
     }

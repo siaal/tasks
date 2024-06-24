@@ -13,3 +13,4 @@ clap = { version = "4.5.7", features = ["derive", "color", "help", "usage", "err
 fuzzy_finder = "0.4.1"
 serde_yml = "0.0.10"
 rand = "0.8.5"
+colored = "2.1.0"
