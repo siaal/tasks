@@ -1,3 +1,4 @@
+use std::cmp;
 use std::error::Error;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -339,7 +340,7 @@ impl Store {
         let mut chosen: Vec<usize> = vec![];
         let mut rng = rand::thread_rng();
         let max_mapping = mappings[mappings.len() - 1].0;
-        for _ in 0..n {
+        for _ in 0..(cmp::min(n as usize, mappings.len())) {
             loop {
                 let chosen_passed: u64 = rng.gen_range((0 as u64)..=max_mapping);
 
