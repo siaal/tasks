@@ -226,7 +226,12 @@ impl fmt::Display for Task {
         )?;
         match &self.metadata.description {
             Some(desc) => {
-                write!(f, "{}\n", desc.to_string().italic().blue())?;
+                let formatted = desc
+                    .split("\\n")
+                    .map(|s| s.trim().to_string().italic().blue());
+                for line in formatted {
+                    write!(f, "{}\n", line)?;
+                }
             },
             None => {
                 write!(
