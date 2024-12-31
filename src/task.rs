@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub struct Task {
     task:     TaskType,
     metadata: Metadata,
+    #[serde(default)]
+    tags:     Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -61,6 +63,31 @@ impl Task {
         &self.metadata.created
     }
 
+    pub fn set_tags(&self, tags: Vec<String>) -> Task {
+        let mut out = self.clone();
+        out.tags = tags;
+        return out;
+    }
+    pub fn add_tags(&self, tags: Vec<String>) -> Task {
+        let mut out = self.clone();
+        for tag in tags.into_iter() {
+            if !out.tags.contains(&tag) {
+                out.tags.push(tag);
+            }
+        }
+        return out;
+    }
+    pub fn remove_tags(&self, tags: &Vec<String>) -> Task {
+        let mut out = self.clone();
+        out.tags = self
+            .tags
+            .iter()
+            .filter(|tag| !tags.contains(tag))
+            .cloned()
+            .collect();
+        return out;
+    }
+
     pub fn updated_todo<'a>(
         &self,
         desc: Option<&'a str>,
@@ -81,7 +108,12 @@ impl Task {
         return out;
     }
 
-    pub fn new_todo<'a>(name: String, description: Option<&'a str>, priority: Option<u16>) -> Task {
+    pub fn new_todo<'a>(
+        name: String,
+        description: Option<&'a str>,
+        priority: Option<u16>,
+        tags: Option<Vec<String>>,
+    ) -> Task {
         let task = TaskType::Todo {};
         let mut meta = Metadata::new();
         meta.name = name.to_string();
@@ -91,9 +123,14 @@ impl Task {
         if let Some(priority) = priority {
             meta.priority = priority;
         }
+        let tags = match tags {
+            Some(tags) => tags,
+            None => vec![],
+        };
         return Task {
             task,
             metadata: meta,
+            tags,
         };
     }
 }
@@ -163,7 +200,17 @@ impl Task {
     }
 
     pub fn contains(&self, string: &str) -> bool {
-        return (self.metadata.contains(string)) || (self.task.contains(string));
+        return (self.metadata.contains(string))
+            || (self.task.contains(string) || (self.tags.contains(&string.to_string())));
+    }
+
+    pub fn is_tagged(&self, tag: &str) -> bool {
+        let result = self
+            .tags
+            .iter()
+            .map(|string| string.as_str())
+            .any(|str| str == tag);
+        return result;
     }
 }
 
@@ -219,6 +266,13 @@ impl fmt::Display for Task {
             "Priority:".italic(),
             self.metadata.priority.to_string().blue()
         )?;
+        if self.tags.len() > 0 {
+            write!(f, "\n{}", "Tags: ".to_string().yellow())?;
+            write!(f, "{}", self.tags[0])?;
+            for tag in self.tags[1..].iter() {
+                write!(f, ", {}", tag)?;
+            }
+        }
         return Ok(());
     }
 }

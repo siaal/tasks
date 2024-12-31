@@ -274,7 +274,7 @@ impl Store {
         }
     }
 
-    pub fn filter_active(&self, terms: &[String]) -> Vec<Task> {
+    pub fn filter_active(&self, terms: &[String], tags: &[String], ntags: &[String]) -> Vec<Task> {
         if let Some(task) = self.keyword_check(terms) {
             return vec![task];
         }
@@ -286,6 +286,8 @@ impl Store {
         active
             .iter()
             .filter(|task| task.mass_contains(&terms))
+            .filter(|task| tags.iter().all(|tag| task.is_tagged(tag)))
+            .filter(|task| !ntags.iter().any(|ntag| task.is_tagged(ntag)))
             .cloned()
             .collect()
     }
@@ -307,12 +309,10 @@ impl Store {
         return Ok(transformed);
     }
 
-    pub fn select_random(&self, n: u8, cutoff: u64) -> Vec<Task> {
-        let active = self.load_active();
+    pub fn select_random_from_list(&self, list: &[Task], n: u8, cutoff: u64) -> Vec<Task> {
         let mut last = self.load_last();
-
         let now = chrono::Local::now();
-        let mappings: Vec<(u64, usize)> = active
+        let mappings: Vec<(u64, usize)> = list
             .iter()
             .enumerate()
             .filter_map(|(idx, task)| {
@@ -324,7 +324,9 @@ impl Store {
                 if duration_passed < cutoff {
                     return None;
                 }
-                return Some((idx, duration_passed));
+                let priority = task.priority();
+                let weight = duration_passed * (*priority as u64);
+                return Some((idx, weight));
             })
             .scan(0 as u64, |counter, (idx, duration_passed)| {
                 *counter += duration_passed;
@@ -354,7 +356,7 @@ impl Store {
                 break;
             }
         }
-        let chosen: Vec<Task> = chosen.iter().map(|i| active.tasks[*i].clone()).collect();
+        let chosen: Vec<Task> = chosen.iter().map(|i| list[*i].clone()).collect();
         if chosen.len() == 1 {
             last.last = Some(chosen[0].id().to_string());
         } else {
@@ -362,6 +364,11 @@ impl Store {
         }
 
         return chosen;
+    }
+
+    pub fn select_random(&self, n: u8, cutoff: u64) -> Vec<Task> {
+        let active = self.load_active();
+        return self.select_random_from_list(&active.tasks, n, cutoff);
     }
 
     fn keyword_check(&self, terms: &[String]) -> Option<Task> {

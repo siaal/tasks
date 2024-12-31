@@ -11,6 +11,12 @@ pub struct Cli {
     /// Runs command as tasks random -f 1
     #[arg(short, long)]
     pub force: bool,
+    /// Must include tags - forces mode to RANDOM
+    #[arg(short, long, value_delimiter = ',')]
+    pub tags:  Option<Vec<String>>,
+    /// Must NOT include tags - forces mode to RANDOM
+    #[arg(short, long, value_delimiter = ',')]
+    pub ntags: Option<Vec<String>>,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -19,7 +25,7 @@ pub struct Cli {
 #[derive(Debug, Args, Deserialize, Serialize, Clone)]
 pub struct AddArgs {
     /// Longer description of task
-    #[arg(short, long)]
+    #[arg(short, long, alias = "desc")]
     pub description: Option<String>,
     /// Modifier to time bias takes integer 0+
     #[arg(short, long)]
@@ -27,7 +33,13 @@ pub struct AddArgs {
     pub priority:    u16,
     /// Task name
     pub name:        Vec<String>,
+    /// Tags for the task
+    #[arg(short, long, value_delimiter = ',')]
+    pub tag:         Vec<String>,
 }
+// TODO:
+// change tag so that you can `--tag foo` and `-tag foo`
+// change list and random so that you can filter by/not tag
 
 #[derive(Debug, Args, Deserialize, Serialize, Clone)]
 pub struct EditArgs {
@@ -35,14 +47,35 @@ pub struct EditArgs {
     #[arg(short, long)]
     pub name:        Option<String>,
     /// New Description
-    #[arg(short, long)]
+    #[arg(short, long, alias = "desc")]
     pub description: Option<String>,
     /// New Priority
     #[arg(short, long)]
     pub priority:    Option<u16>,
+    /// Removes any instance of tag from the chosen Todo
+    #[arg(short, long, value_delimiter = ',')]
+    pub rtag:        Option<Vec<String>>,
+    /// Adds all tags to the chosen Todo
+    #[arg(short, long, value_delimiter = ',')]
+    pub atag:        Option<Vec<String>>,
+    /// Sets the tags of the chosen todo
+    #[arg(short, long, value_delimiter = ',')]
+    pub stag:        Option<Vec<String>>,
     /// Identifier string
     #[arg(required = true)]
     pub identifier:  Vec<String>,
+}
+
+#[derive(Debug, Args, Deserialize, Serialize, Clone)]
+pub struct ListArgs {
+    /// Must include tags
+    #[arg(short, long, value_delimiter = ',')]
+    pub tags:  Option<Vec<String>>,
+    /// Must NOT include tags
+    #[arg(short, long, value_delimiter = ',')]
+    pub ntags: Option<Vec<String>>,
+    /// Filter search with provided terms
+    pub terms: Vec<String>,
 }
 
 #[derive(Debug, Subcommand, Deserialize, Serialize, Clone)]
@@ -55,6 +88,12 @@ pub enum Commands {
     /// Produce a random task, with a bias for older tasks
     #[command(alias = "r")]
     Random {
+        /// Must include tags
+        #[arg(short, long, value_delimiter = ',')]
+        tags:  Option<Vec<String>>,
+        /// Must NOT include tags
+        #[arg(short, long, value_delimiter = ',')]
+        ntags: Option<Vec<String>>,
         /// Sets random selection cutoff to 0 so that newly minted tasks can be selected
         #[arg(short, long)]
         force: bool,
@@ -92,10 +131,7 @@ pub enum Commands {
     },
     /// List pending tasks
     #[command(alias = "l")]
-    List {
-        /// Filter search with provided terms
-        terms: Vec<String>,
-    },
+    List(ListArgs),
     /// Reverts the previous entry in the undo list (that changed bank state)
     #[command(alias = "u")]
     Undo,

@@ -6,7 +6,7 @@ use std::error::Error;
 use std::process::exit;
 
 use clap::Parser;
-use tasks::parser::{AddArgs, Cli, Commands, EditArgs};
+use tasks::parser::{AddArgs, Cli, Commands, EditArgs, ListArgs};
 use tasks::store::{init_store, Store};
 use tasks::task::Task;
 use tasks::Config;
@@ -25,13 +25,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         dbg!(&conf);
     }
-    if cli.force {
+    if cli.force || cli.ntags.is_some() || cli.tags.is_some() {
         conf.cutoff = 0;
-        run_random(&conf, 1);
+        run_random(&conf, 1, cli.tags, cli.ntags);
         exit(0);
     }
     let command = cli.command.unwrap_or(Commands::Random {
         n:     1,
+        tags:  None,
+        ntags: None,
         force: false,
     });
     if conf.debug {
@@ -39,16 +41,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     init_store(&conf.task_path)?;
     match &command {
-        Commands::List { terms } => run_list(&conf, terms),
-        Commands::Last => run_list(&conf, &["last".into()].to_vec()),
+        Commands::List(args) => run_list(&conf, args),
+        Commands::Last => run_list(
+            &conf,
+            &ListArgs {
+                tags:  None,
+                ntags: None,
+                terms: ["last".into()].to_vec(),
+            },
+        ),
         Commands::Add(opts) => run_add(&conf, opts),
         Commands::Touch { terms } | Commands::Done { terms } => run_touch(&conf, terms),
         Commands::Close { terms } => run_complete(&conf, terms),
-        Commands::Random { n, force } => {
+        Commands::Random {
+            tags,
+            ntags,
+            n,
+            force,
+        } => {
             if *force {
                 conf.cutoff = 0;
             }
-            run_random(&conf, *n);
+            run_random(&conf, *n, tags.clone(), ntags.clone());
         },
         Commands::Edit(args) => run_edit(&conf, args),
         Commands::Undo => run_undo(&conf),
@@ -64,9 +78,14 @@ fn run_undo(conf: &Config) {
     }
 }
 
-fn run_random(conf: &Config, n: u8) {
+fn run_random(conf: &Config, n: u8, tags: Option<Vec<String>>, ntags: Option<Vec<String>>) {
     let store = Store::new(conf.task_path.clone());
-    let items = store.select_random(n, conf.cutoff.clone());
+    let items = store.filter_active(
+        &vec![],
+        &tags.unwrap_or_default(),
+        &ntags.unwrap_or_default(),
+    );
+    let items = store.select_random_from_list(&items, n, conf.cutoff.clone());
 
     print_tasks(&items);
     if conf.debug {
@@ -81,7 +100,12 @@ fn run_add(conf: &Config, args: &AddArgs) {
         None => None,
     };
 
-    let task = Task::new_todo(args.name.join(" "), desc, Some(args.priority));
+    let task = Task::new_todo(
+        args.name.join(" "),
+        desc,
+        Some(args.priority),
+        Some(args.tag.to_owned()),
+    );
     match store.append(task) {
         Ok(task) => {
             println!("Appended task:");
@@ -127,6 +151,16 @@ fn run_edit(conf: &Config, args: &EditArgs) {
             print_task(&task);
             print!("!!!!!!!!!!!! HAS BECOME !!!!!!!!!!!!");
             let out = update_item(store, task, conf, |task| {
+                let mut task = task.to_owned();
+                if let Some(addtags) = &args.atag {
+                    task = task.add_tags(addtags.to_vec());
+                }
+                if let Some(rmtags) = &args.rtag {
+                    task = task.remove_tags(rmtags);
+                }
+                if let Some(settags) = &args.stag {
+                    task = task.set_tags(settags.to_vec());
+                }
                 task.updated_todo(
                     args.description.as_deref(),
                     args.priority.as_ref(),
@@ -181,13 +215,20 @@ fn retire_item(conf: &Config, terms: &[String]) -> Task {
     }
 }
 
-fn run_list(conf: &Config, terms: &Vec<String>) {
+fn run_list(conf: &Config, args: &ListArgs) {
     let store = Store::new(conf.task_path.clone());
-    let items = store.filter_active(terms);
+    let items: Vec<Task> = store
+        .filter_active(
+            &args.terms,
+            &args.tags.clone().unwrap_or_default(),
+            &args.ntags.clone().unwrap_or_default(),
+        )
+        .into_iter()
+        .collect();
     if items.len() == 0 {
         println!(
             "{}",
-            if terms.len() == 0 {
+            if args.terms.len() == 0 && args.tags.is_none() && args.ntags.is_none() {
                 "You have no pending tasks!"
             } else {
                 "No tasks match your query!"
