@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
         ),
         Commands::Add(opts) => run_add(&conf, opts),
-        Commands::Touch { terms } | Commands::Done { terms } => run_touch(&conf, terms),
+        Commands::Done { terms } => run_touch(&conf, terms),
         Commands::Close { terms } => run_complete(&conf, terms),
         Commands::Random {
             tags,
@@ -149,7 +149,7 @@ fn run_edit(conf: &Config, args: &EditArgs) {
         Some(task) => {
             println!("Editing:");
             print_task(&task);
-            print!("!!!!!!!!!!!! HAS BECOME !!!!!!!!!!!!");
+            print!("vvvvvvvvvvvv HAS BECOME vvvvvvvvvvvv\n");
             let out = update_item(store, task, conf, |task| {
                 let mut task = task.to_owned();
                 if let Some(addtags) = &args.atag {

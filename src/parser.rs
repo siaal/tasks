@@ -103,15 +103,8 @@ pub enum Commands {
     /// Edit an existing task
     #[command(alias = "e")]
     Edit(EditArgs),
-    /// Update the last played, without closing it
-    #[command(alias = "t")]
-    Touch {
-        #[arg(required = true)]
-        /// Filter search with provided terms
-        terms: Vec<String>,
-    },
     /// Complete a round of the task, without closing it
-    #[command(alias = "d")]
+    #[command(alias = "d", visible_alias = "touch", alias = "t")]
     Done {
         #[arg(required = true)]
         /// Filter search with provided terms
